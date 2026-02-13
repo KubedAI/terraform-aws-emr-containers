@@ -85,7 +85,7 @@ module "emr_on_eks" {
 | `tags` | Tags to apply to all resources | `map(string)` | `{}` | no |
 | `enable_pod_identity_trust_conditions` | Add source-account trust condition to pod identity roles | `bool` | `true` | no |
 | `iam_role_permissions_boundary` | Default permissions boundary ARN for created IAM roles | `string` | `null` | no |
-| `enable_cloudwatch_kms_encryption` | Encrypt module-managed CloudWatch log groups with CMK | `bool` | `true` | no |
+| `enable_cloudwatch_kms_encryption` | Encrypt module-managed CloudWatch log groups with CMK (default: AWS default encryption) | `bool` | `false` | no |
 | `cloudwatch_kms_key_id` | Existing KMS key ARN for CloudWatch log groups | `string` | `null` | no |
 | `create_cloudwatch_kms_key` | Create a KMS key when encryption is enabled and no external key is provided | `bool` | `true` | no |
 | `cloudwatch_kms_key_enable_rotation` | Enable key rotation for module-managed KMS key | `bool` | `true` | no |
@@ -111,7 +111,6 @@ module "emr_on_eks" {
 | `create_cloudwatch_log_group` | Whether to create a CloudWatch log group | `bool` | `true` |
 | `cloudwatch_log_group_name` | Custom CloudWatch log group name | `string` | `"/emr-on-eks/{cluster}/{team}"` |
 | `cloudwatch_log_group_retention` | Log group retention in days | `number` | `30` |
-| `cloudwatch_kms_key_id` | Team-specific KMS key ARN for CloudWatch log group encryption | `string` | `null` |
 | `tags` | Team-specific tags (merged with module-level tags) | `map(string)` | `{}` |
 
 Validation notes:
@@ -163,7 +162,7 @@ Default IAM role names use an MD5-based short hash (`emr-{hash6}`) to keep gener
 
 ### Security Defaults
 
-- CloudWatch log groups are encrypted with a customer-managed [KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) by default.
+- CloudWatch log groups use AWS default encryption; optionally encrypt with a customer-managed [KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) via `enable_cloudwatch_kms_encryption`.
 - Pod identity trust policies include an [`aws:SourceAccount`](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html#condition-keys-sourceaccount) condition by default.
 - S3 access can be narrowed to key prefixes using `s3_object_prefixes`.
 - IAM role [permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) can be enforced globally or per team.

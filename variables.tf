@@ -22,9 +22,9 @@ variable "iam_role_permissions_boundary" {
 }
 
 variable "enable_cloudwatch_kms_encryption" {
-  description = "Whether to encrypt module-managed CloudWatch log groups with a customer-managed KMS key"
+  description = "Whether to encrypt module-managed CloudWatch log groups with a customer-managed KMS key. When false, log groups use the AWS default encryption."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cloudwatch_kms_key_id" {
@@ -79,7 +79,6 @@ variable "teams" {
     create_cloudwatch_log_group    = optional(bool, true)
     cloudwatch_log_group_name      = optional(string)
     cloudwatch_log_group_retention = optional(number, 30)
-    cloudwatch_kms_key_id          = optional(string)
     tags                           = optional(map(string), {})
   }))
 

@@ -1,11 +1,10 @@
 # cloudwatch.tf — CloudWatch log groups and optional KMS encryption
 #
-# KMS key strategy (three levels, highest priority first):
-#   1. Team-level key   — teams[k].cloudwatch_kms_key_id
-#   2. Module-level key — var.cloudwatch_kms_key_id (bring your own)
-#   3. Module-managed   — created here when var.create_cloudwatch_kms_key = true
+# KMS key strategy (two levels, highest priority first):
+#   1. Module-level key — var.cloudwatch_kms_key_id (bring your own)
+#   2. Module-managed   — created here when var.create_cloudwatch_kms_key = true
 #
-# Set enable_cloudwatch_kms_encryption = false to disable encryption entirely.
+# By default, log groups use the AWS default encryption (enable_cloudwatch_kms_encryption = false).
 
 ################################################################################
 # Locals
@@ -22,18 +21,12 @@ locals {
 
   module_cloudwatch_kms_key_arn = local.create_module_cloudwatch_kms_key ? aws_kms_key.cloudwatch[0].arn : null
 
-  # Resolved KMS key ARN per team log group.
-  team_log_group_kms_key_arns = {
-    for k, v in var.teams : k => (
-      var.enable_cloudwatch_kms_encryption
-      ? (
-        v.cloudwatch_kms_key_id != null ? v.cloudwatch_kms_key_id : (
-          var.cloudwatch_kms_key_id != null ? var.cloudwatch_kms_key_id : local.module_cloudwatch_kms_key_arn
-        )
-      )
-      : null
-    )
-  }
+  # Resolved KMS key ARN for all log groups (module-level only, no per-team override).
+  cloudwatch_kms_key_arn = (
+    var.enable_cloudwatch_kms_encryption
+    ? coalesce(var.cloudwatch_kms_key_id, local.module_cloudwatch_kms_key_arn)
+    : null
+  )
 }
 
 data "aws_iam_policy_document" "cloudwatch_logs_kms" {
@@ -103,11 +96,11 @@ resource "aws_cloudwatch_log_group" "team" {
 
   name              = local.team_log_group_names[each.key]
   retention_in_days = each.value.cloudwatch_log_group_retention
-  kms_key_id        = local.team_log_group_kms_key_arns[each.key]
+  kms_key_id        = local.cloudwatch_kms_key_arn
 
   lifecycle {
     precondition {
-      condition     = !var.enable_cloudwatch_kms_encryption || local.team_log_group_kms_key_arns[each.key] != null
+      condition     = !var.enable_cloudwatch_kms_encryption || local.cloudwatch_kms_key_arn != null
       error_message = "CloudWatch KMS encryption is enabled, but no KMS key could be resolved. Set cloudwatch_kms_key_id or enable create_cloudwatch_kms_key."
     }
   }
