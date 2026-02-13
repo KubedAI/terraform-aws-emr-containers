@@ -1,19 +1,36 @@
 # terraform-aws-emr-containers
 
-Terraform module for provisioning EMR on EKS virtual clusters with multi-tenancy support. Each team gets its own Kubernetes namespace, EMR virtual cluster, IAM execution role, CloudWatch log group, and Pod Identity associations.
+Terraform module for provisioning [Amazon EMR on EKS](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/emr-eks.html) virtual clusters with multi-tenancy support.
+
+[EMR on EKS](https://aws.amazon.com/emr/features/eks/) lets you run [Apache Spark](https://spark.apache.org/) jobs on [Amazon EKS](https://aws.amazon.com/eks/) clusters without managing separate EMR infrastructure. This module automates the per-team setup that EMR on EKS requires: for each team defined in the `teams` map, it creates a dedicated [Kubernetes namespace](https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/), [EMR virtual cluster](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/virtual-cluster.html), [IAM execution role](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/iam-execution-role.html), [CloudWatch log group](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/Working-with-log-groups-and-streams.html), and [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) associations.
+
+### Architecture
+
+```
+EKS Cluster
+  ├── Team A Namespace
+  │     ├── EMR Virtual Cluster
+  │     ├── Kubernetes Role / RoleBinding
+  │     ├── Pod Identity Associations (client, driver, executor)
+  │     └── IAM Execution Role ──► S3, CloudWatch Logs, Glue
+  ├── Team B Namespace
+  │     └── ...
+  └── Team N Namespace
+        └── ...
+```
 
 ## Features
 
-- Multi-tenancy via a `teams` map -- define as many teams as needed
-- Pod Identity associations (not IRSA) with automatic base36 service account naming
+- Multi-tenancy via a `teams` map — define as many teams as needed
+- [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) associations (not IRSA) with automatic base36 service account naming
 - Conditional namespace creation (`create_namespace = false` for pre-existing namespaces)
-- Namespace-scoped Kubernetes RBAC for EMR on EKS (`create_emr_rbac = true` by default)
+- Namespace-scoped [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) for EMR on EKS (`create_emr_rbac = true` by default)
 - Conditional IAM role creation (`create_iam_role = false` to bring your own role)
-- Conditional CloudWatch log group creation (`create_cloudwatch_log_group = false` to bring your own)
-- Scoped IAM policies: S3 (bucket/object split with optional prefix scoping), CloudWatch Logs, Glue catalog
-- CloudWatch Logs encryption with customer-managed KMS keys (module-managed key by default)
-- Optional IAM permissions boundary on created execution roles
-- Optional pod identity trust-policy hardening with source-account condition
+- Conditional [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/WhatIsCloudWatchLogs.html) log group creation (`create_cloudwatch_log_group = false` to bring your own)
+- Scoped IAM policies: [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) (bucket/object split with optional prefix scoping), CloudWatch Logs, [Glue catalog](https://docs.aws.amazon.com/glue/latest/dg/catalog-and-crawler.html)
+- CloudWatch Logs encryption with customer-managed [KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) keys (module-managed key by default)
+- Optional [IAM permissions boundary](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) on created execution roles
+- Optional pod identity trust-policy hardening with `aws:SourceAccount` condition
 - Deterministic short IAM role names to reduce generated service account length
 
 ## Usage
@@ -126,19 +143,19 @@ Validation notes:
 
 ### Pod Identity and Base36 Encoding
 
-EMR on EKS creates Kubernetes service accounts with the naming pattern:
+[EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) is the recommended way to grant AWS permissions to Kubernetes pods, replacing the older [IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) approach. EMR on EKS creates Kubernetes service accounts with the naming pattern:
 
 ```
 emr-containers-sa-spark-{ROLE}-{ACCOUNT_ID}-{BASE36_ENCODED_ROLE_NAME}
 ```
 
-Where `ROLE` is one of `client`, `driver`, or `executor`. The module uses the `justenwalker/encode` provider to compute the base36 encoding, matching the algorithm used by the AWS CLI (`awscli/customizations/emrcontainers/base36.py`).
+Where `ROLE` is one of `client`, `driver`, or `executor`. The module uses the [`justenwalker/encode`](https://registry.terraform.io/providers/justenwalker/encode/latest) provider to compute the base36 encoding, matching the algorithm used by the AWS CLI (`awscli/customizations/emrcontainers/base36.py`).
 
 ### Kubernetes RBAC
 
-By default, the module creates a namespace-scoped `Role` and `RoleBinding` named `emr-containers` per team namespace. This follows the EMR on EKS manual cluster-access model and grants the `emr-containers` Kubernetes user the permissions needed to orchestrate workloads inside that namespace.
+By default, the module creates a namespace-scoped [`Role` and `RoleBinding`](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) named `emr-containers` per team namespace. This follows the [EMR on EKS manual cluster-access model](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/setting-up-cluster-access.html) and grants the `emr-containers` Kubernetes user the permissions needed to orchestrate workloads inside that namespace.
 
-Note: this module does not manage EKS authentication mappings (`aws-auth` ConfigMap or EKS access entries). If your cluster requires manual access mapping for the `emr-containers` user, configure that separately.
+Note: this module does not manage EKS authentication mappings ([`aws-auth` ConfigMap](https://docs.aws.amazon.com/eks/latest/userguide/auth-configmap.html) or [EKS access entries](https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html)). If your cluster requires manual access mapping for the `emr-containers` user, configure that separately.
 
 ### IAM Role Naming
 
@@ -146,10 +163,10 @@ Default IAM role names use an MD5-based short hash (`emr-{hash6}`) to keep gener
 
 ### Security Defaults
 
-- CloudWatch log groups are encrypted with a customer-managed KMS key by default.
-- Pod identity trust policies include an `aws:SourceAccount` condition by default.
+- CloudWatch log groups are encrypted with a customer-managed [KMS key](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) by default.
+- Pod identity trust policies include an [`aws:SourceAccount`](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html#condition-keys-sourceaccount) condition by default.
 - S3 access can be narrowed to key prefixes using `s3_object_prefixes`.
-- IAM role permissions boundaries can be enforced globally or per team.
+- IAM role [permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) can be enforced globally or per team.
 
 ## Disclaimer
 
