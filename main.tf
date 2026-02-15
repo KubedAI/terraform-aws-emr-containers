@@ -44,6 +44,16 @@ resource "kubernetes_namespace_v1" "team" {
 # EMR Virtual Clusters
 ################################################################################
 
+# Brief delay after namespace creation to allow the EKS control plane to
+# propagate the namespace before EMR's CreateVirtualCluster API reads it.
+resource "time_sleep" "wait_for_namespace" {
+  count = length(local.teams_create_namespace) > 0 ? 1 : 0
+
+  create_duration = "10s"
+
+  depends_on = [kubernetes_namespace_v1.team]
+}
+
 resource "aws_emrcontainers_virtual_cluster" "team" {
   for_each = var.teams
 
@@ -63,6 +73,7 @@ resource "aws_emrcontainers_virtual_cluster" "team" {
   tags = merge(var.tags, each.value.tags)
 
   depends_on = [
+    time_sleep.wait_for_namespace,
     kubernetes_namespace_v1.team,
     kubernetes_role_binding_v1.emr_containers,
   ]

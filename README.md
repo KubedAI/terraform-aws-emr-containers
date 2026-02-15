@@ -10,7 +10,7 @@ Terraform module for provisioning [Amazon EMR on EKS](https://docs.aws.amazon.co
 EKS Cluster
   ├── Team A Namespace
   │     ├── EMR Virtual Cluster
-  │     ├── Kubernetes Role / RoleBinding
+  │     ├── Kubernetes Role / RoleBinding (optional — legacy aws-auth only)
   │     ├── Pod Identity Associations (client, driver, executor)
   │     └── IAM Execution Role ──► S3, CloudWatch Logs, Glue
   ├── Team B Namespace
@@ -24,7 +24,7 @@ EKS Cluster
 - Multi-tenancy via a `teams` map — define as many teams as needed
 - [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) associations (not IRSA) with automatic base36 service account naming
 - Conditional namespace creation (`create_namespace = false` for pre-existing namespaces)
-- Namespace-scoped [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) for EMR on EKS (`create_emr_rbac = true` by default)
+- Optional namespace-scoped [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) for EMR on EKS (legacy `aws-auth` clusters only; `create_emr_rbac = false` by default)
 - Conditional IAM role creation (`create_iam_role = false` to bring your own role)
 - Conditional [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/WhatIsCloudWatchLogs.html) log group creation (`create_cloudwatch_log_group = false` to bring your own)
 - Scoped IAM policies: [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) (bucket/object split with optional prefix scoping), CloudWatch Logs, [Glue catalog](https://docs.aws.amazon.com/glue/latest/dg/catalog-and-crawler.html)
@@ -68,6 +68,7 @@ module "emr_on_eks" {
 | [aws](https://registry.terraform.io/providers/hashicorp/aws) | >= 6.28 |
 | [kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes) | >= 2.38 |
 | [encode](https://registry.terraform.io/providers/justenwalker/encode) | 0.3.0-beta.1 |
+| [time](https://registry.terraform.io/providers/hashicorp/time) | >= 0.9 |
 
 ## Providers
 
@@ -76,6 +77,7 @@ module "emr_on_eks" {
 | aws | >= 6.28 |
 | kubernetes | >= 2.38 |
 | encode | 0.3.0-beta.1 |
+| time | >= 0.9 |
 
 ## Inputs
 
@@ -99,7 +101,7 @@ module "emr_on_eks" {
 |------|-------------|------|---------|
 | `namespace` | Kubernetes namespace name | `string` | `"emr-{team_key}"` |
 | `create_namespace` | Whether to create the Kubernetes namespace | `bool` | `true` |
-| `create_emr_rbac` | Whether to create namespace-scoped Kubernetes Role and RoleBinding for EMR on EKS | `bool` | `true` |
+| `create_emr_rbac` | Whether to create namespace-scoped Kubernetes Role and RoleBinding for EMR on EKS (only needed for legacy `aws-auth` clusters) | `bool` | `false` |
 | `create_iam_role` | Whether to create an IAM execution role | `bool` | `true` |
 | `iam_role_name` | Custom IAM role name (overrides auto-generated) | `string` | `null` |
 | `iam_role_permissions_boundary` | Team-specific IAM permissions boundary ARN (overrides module default) | `string` | `null` |
@@ -152,9 +154,13 @@ Where `ROLE` is one of `client`, `driver`, or `executor`. The module uses the [`
 
 ### Kubernetes RBAC
 
-By default, the module creates a namespace-scoped [`Role` and `RoleBinding`](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) named `emr-containers` per team namespace. This follows the [EMR on EKS manual cluster-access model](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/setting-up-cluster-access.html) and grants the `emr-containers` Kubernetes user the permissions needed to orchestrate workloads inside that namespace.
+There are two approaches for granting EMR on EKS the Kubernetes permissions it needs:
 
-Note: this module does not manage EKS authentication mappings ([`aws-auth` ConfigMap](https://docs.aws.amazon.com/eks/latest/userguide/auth-configmap.html) or [EKS access entries](https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html)). If your cluster requires manual access mapping for the `emr-containers` user, configure that separately.
+**EKS Access Entries (recommended, EKS 1.23+):** When your cluster uses [EKS access entries](https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html) for authentication, EMR automatically creates the necessary namespace-scoped RBAC resources when you call [`CreateVirtualCluster`](https://docs.aws.amazon.com/emr-on-eks/latest/APIReference/API_CreateVirtualCluster.html). No manual Kubernetes Role or RoleBinding is needed. This is the default behavior of this module (`create_emr_rbac = false`).
+
+**Legacy `aws-auth` ConfigMap:** If your cluster still uses the [`aws-auth` ConfigMap](https://docs.aws.amazon.com/eks/latest/userguide/auth-configmap.html) for authentication, you must manually create the RBAC resources. Set `create_emr_rbac = true` per team to have the module create a namespace-scoped [`Role` and `RoleBinding`](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) named `emr-containers` matching the [EMR on EKS cluster access setup](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/setting-up-cluster-access.html). You must also map the `emr-containers` Kubernetes user in the `aws-auth` ConfigMap separately.
+
+Note: this module does not manage EKS authentication mappings (`aws-auth` ConfigMap or access entries). Configure those separately in your EKS cluster module.
 
 ### IAM Role Naming
 
@@ -166,6 +172,41 @@ Default IAM role names use an MD5-based short hash (`emr-{hash6}`) to keep gener
 - Pod identity trust policies include an [`aws:SourceAccount`](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html#condition-keys-sourceaccount) condition by default.
 - S3 access can be narrowed to key prefixes using `s3_object_prefixes`.
 - IAM role [permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) can be enforced globally or per team.
+
+## Prerequisites: IAM Permissions for Deployment
+
+The Terraform execution role or user deploying this module needs the following least-privilege IAM permissions against your existing EKS cluster:
+
+**EKS** (for [Access Entries](https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html) — used by `CreateVirtualCluster`):
+- `eks:CreateAccessEntry`, `eks:DescribeAccessEntry`, `eks:DeleteAccessEntry`
+- `eks:ListAssociatedAccessPolicies`, `eks:AssociateAccessPolicy`, `eks:DisassociateAccessPolicy`
+
+**EKS** (for [Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) associations):
+- `eks:CreatePodIdentityAssociation`, `eks:DeletePodIdentityAssociation`
+- `eks:DescribePodIdentityAssociation`, `eks:ListPodIdentityAssociations`
+
+**EMR on EKS**:
+- `emr-containers:CreateVirtualCluster`, `emr-containers:DeleteVirtualCluster`
+- `emr-containers:DescribeVirtualCluster`, `emr-containers:ListVirtualClusters`
+
+**IAM** (for creating [execution roles](https://docs.aws.amazon.com/emr/latest/EMR-on-EKS-DevelopmentGuide/iam-execution-role.html)):
+- `iam:CreateRole`, `iam:DeleteRole`, `iam:GetRole`, `iam:PassRole`, `iam:TagRole`
+- `iam:PutRolePolicy`, `iam:DeleteRolePolicy`, `iam:GetRolePolicy`
+- `iam:AttachRolePolicy`, `iam:DetachRolePolicy`, `iam:ListAttachedRolePolicies`
+- `iam:ListRolePolicies`, `iam:ListInstanceProfilesForRole`
+
+**CloudWatch Logs**:
+- `logs:CreateLogGroup`, `logs:DeleteLogGroup`, `logs:DescribeLogGroups`
+- `logs:PutRetentionPolicy`, `logs:TagResource`, `logs:ListTagsForResource`
+
+**KMS** (only if `enable_cloudwatch_kms_encryption = true`):
+- `kms:CreateKey`, `kms:DescribeKey`, `kms:GetKeyPolicy`, `kms:GetKeyRotationStatus`
+- `kms:PutKeyPolicy`, `kms:EnableKeyRotation`, `kms:TagResource`
+- `kms:ScheduleKeyDeletion`, `kms:ListResourceTags`
+
+**Kubernetes** (via kubeconfig / EKS auth token):
+- Create/delete namespaces (if `create_namespace = true`)
+- Create/delete Roles, RoleBindings in team namespaces (if `create_emr_rbac = true`)
 
 ## Disclaimer
 

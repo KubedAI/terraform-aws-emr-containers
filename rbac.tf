@@ -1,5 +1,9 @@
 # rbac.tf — Namespace-scoped Kubernetes RBAC for EMR on EKS
 # Creates Role and RoleBinding per team namespace to allow EMR to orchestrate jobs.
+#
+# NOTE: This is only needed for clusters using the legacy aws-auth ConfigMap
+# authentication. Clusters using EKS Access Entries (recommended for EKS 1.23+)
+# get RBAC created automatically by the CreateVirtualCluster API.
 
 locals {
   # Teams that need namespace-scoped EMR on EKS RBAC created
@@ -20,22 +24,23 @@ resource "kubernetes_role_v1" "emr_containers" {
     }
   }
 
-  # Namespace-scoped permissions for EMR on EKS to orchestrate jobs.
+  # Core resources for EMR on EKS job orchestration
   rule {
     api_groups = [""]
     resources = [
       "configmaps",
       "events",
+      "namespaces",
       "persistentvolumeclaims",
       "pods",
       "pods/log",
-      "secrets",
       "serviceaccounts",
       "services",
     ]
     verbs = [
       "create",
       "delete",
+      "deletecollection",
       "get",
       "list",
       "patch",
@@ -44,6 +49,20 @@ resource "kubernetes_role_v1" "emr_containers" {
     ]
   }
 
+  # Secrets — restricted verbs (no get/list per AWS docs)
+  rule {
+    api_groups = [""]
+    resources  = ["secrets"]
+    verbs = [
+      "create",
+      "delete",
+      "deletecollection",
+      "patch",
+      "watch",
+    ]
+  }
+
+  # RBAC resources
   rule {
     api_groups = ["rbac.authorization.k8s.io"]
     resources = [
@@ -53,6 +72,58 @@ resource "kubernetes_role_v1" "emr_containers" {
     verbs = [
       "create",
       "delete",
+      "deletecollection",
+      "get",
+      "list",
+      "patch",
+      "update",
+      "watch",
+    ]
+  }
+
+  # Apps resources
+  rule {
+    api_groups = ["apps"]
+    resources = [
+      "deployments",
+      "statefulsets",
+    ]
+    verbs = [
+      "create",
+      "delete",
+      "deletecollection",
+      "get",
+      "list",
+      "patch",
+      "update",
+      "watch",
+    ]
+  }
+
+  # Batch resources
+  rule {
+    api_groups = ["batch"]
+    resources  = ["jobs"]
+    verbs = [
+      "create",
+      "delete",
+      "deletecollection",
+      "get",
+      "list",
+      "patch",
+      "update",
+      "watch",
+    ]
+  }
+
+  # Networking resources
+  rule {
+    api_groups = ["extensions", "networking.k8s.io"]
+    resources  = ["ingresses"]
+    verbs = [
+      "create",
+      "delete",
+      "deletecollection",
       "get",
       "list",
       "patch",

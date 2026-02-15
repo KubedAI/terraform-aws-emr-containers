@@ -67,7 +67,7 @@ variable "teams" {
   type = map(object({
     namespace                      = optional(string)
     create_namespace               = optional(bool, true)
-    create_emr_rbac                = optional(bool, true)
+    create_emr_rbac                = optional(bool, false)
     create_iam_role                = optional(bool, true)
     iam_role_name                  = optional(string)
     iam_role_permissions_boundary  = optional(string)
