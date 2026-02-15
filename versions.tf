@@ -14,5 +14,9 @@ terraform {
       source  = "justenwalker/encode"
       version = "0.3.0-beta.1"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = ">= 0.9"
+    }
   }
 }
