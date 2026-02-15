@@ -37,7 +37,12 @@ EKS Cluster
 
 ```hcl
 module "emr_on_eks" {
-  source = "github.com/KubedAI/terraform-aws-emr-containers"
+  # IMPORTANT:
+  # Always pin to the latest stable release tag of this module.
+  # Update the `ref` value when upgrading to a newer version.
+  # This ensures reproducible deployments and prevents unexpected changes
+  # from main-branch updates.
+  source = "git::https://github.com/KubedAI/terraform-aws-emr-containers.git?ref=v0.2.1"
 
   eks_cluster_name = "my-eks-cluster"
 

@@ -51,6 +51,8 @@ provider "encode" {}
 #############################################
 module "emr_on_eks" {
   source = "../../"
+  # To consume the module form Github, use the below source path and update the version as needed.
+  # source = "git::https://github.com/KubedAI/terraform-aws-emr-containers.git?ref=v0.2.1"
 
   eks_cluster_name                 = var.eks_cluster_name
   enable_cloudwatch_kms_encryption = false
