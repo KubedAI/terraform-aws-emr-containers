@@ -6,22 +6,27 @@
 #   VIRTUAL_CLUSTER_ID
 #   EXECUTION_ROLE_ARN
 #
-# Commands to fetch values:
-#   TEAM=analytics
-#   terraform output -json virtual_clusters | jq -r ".${TEAM}.id"
-#   terraform output -json job_execution_role_arns | jq -r ".${TEAM}"
+# Usage:
+#   ./validate-emr-on-eks.sh <path-to-terraform-example>
+#
+# Examples:
+#   TEAM=analytics ./validate-emr-on-eks.sh ../basic
+#   TEAM=datateam-a ./validate-emr-on-eks.sh ../deploy-without-eks-access
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# The Terraform state for this example is in examples/basic.
-STACK_DIR="${SCRIPT_DIR}"
+
+# First positional arg = path to the Terraform example that holds state.
+# Defaults to examples/basic (original location).
+STACK_DIR="${1:-${SCRIPT_DIR}/../basic}"
+STACK_DIR="$(cd "${STACK_DIR}" && pwd)"
 
 TEAM="${TEAM:-analytics}"
 RELEASE_LABEL="${RELEASE_LABEL:-emr-7.12.0-latest}"
 
-VIRTUAL_CLUSTER_ID="$(terraform -chdir="${STACK_DIR}" output -json virtual_clusters | jq -r ".${TEAM}.id")"
-EXECUTION_ROLE_ARN="$(terraform -chdir="${STACK_DIR}" output -json job_execution_role_arns | jq -r ".${TEAM}")"
+VIRTUAL_CLUSTER_ID="$(terraform -chdir="${STACK_DIR}" output -json virtual_clusters | jq -r ".[\"${TEAM}\"].id")"
+EXECUTION_ROLE_ARN="$(terraform -chdir="${STACK_DIR}" output -json job_execution_role_arns | jq -r ".[\"${TEAM}\"]")"
 
 echo "TEAM=${TEAM}"
 echo "VIRTUAL_CLUSTER_ID=${VIRTUAL_CLUSTER_ID}"
@@ -34,7 +39,7 @@ fi
 
 
 JOB_NAME="sparkpi-${TEAM}-$(date +%Y%m%d%H%M%S)"
-LOG_GROUP="$(terraform -chdir="${STACK_DIR}" output -json cloudwatch_log_groups | jq -r ".${TEAM}.name")"
+LOG_GROUP="$(terraform -chdir="${STACK_DIR}" output -json cloudwatch_log_groups | jq -r ".[\"${TEAM}\"].name")"
 LOG_PREFIX="sparkpi"
 
 echo "Submitting EMR on EKS job..."

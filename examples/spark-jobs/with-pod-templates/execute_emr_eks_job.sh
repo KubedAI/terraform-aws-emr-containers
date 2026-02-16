@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Simple NVMe pod-template EMR on EKS submit example (submit only).
+# NVMe pod-template EMR on EKS submit example (submit only).
 #
-# Fill these values before running:
-#   TEAM
-#   S3_BUCKET_URI (example: s3://my-bucket)
+# Usage:
+#   S3_BUCKET_URI=s3://my-bucket ./execute_emr_eks_job.sh <path-to-terraform-example>
 #
-# Commands to fetch Terraform values:
-#   TEAM=analytics
-#   terraform output -json virtual_clusters | jq -r ".${TEAM}.id"
-#   terraform output -json virtual_clusters | jq -r ".${TEAM}.namespace"
-#   terraform output -json job_execution_role_arns | jq -r ".${TEAM}"
+# Examples:
+#   S3_BUCKET_URI=s3://my-bucket TEAM=analytics ./execute_emr_eks_job.sh ../../basic
+#   S3_BUCKET_URI=s3://my-bucket TEAM=datateam-a ./execute_emr_eks_job.sh ../../deploy-without-eks-access
+#
+# Environment variables:
+#   TEAM            - Team name matching a key in the teams map (default: analytics)
+#   S3_BUCKET_URI   - S3 bucket for job artifacts and data (required)
+#   RELEASE_LABEL   - EMR release label (default: emr-7.12.0-latest)
+#   AWS_REGION      - AWS region (default: us-west-2)
 
 set -euo pipefail
 
@@ -26,7 +29,11 @@ require_cmd terraform
 require_cmd wget
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STACK_DIR="$(cd "${SCRIPT_DIR}/../basic" && pwd)"
+
+# First positional arg = path to the Terraform example that holds state.
+# Defaults to examples/basic.
+STACK_DIR="${1:-${SCRIPT_DIR}/../../basic}"
+STACK_DIR="$(cd "${STACK_DIR}" && pwd)"
 
 TEAM="${TEAM:-analytics}"
 S3_BUCKET_URI="${S3_BUCKET_URI:-REPLACE_ME}"
@@ -38,9 +45,9 @@ if [[ "${S3_BUCKET_URI}" == "REPLACE_ME" ]]; then
   exit 1
 fi
 
-VIRTUAL_CLUSTER_ID="$(terraform -chdir="${STACK_DIR}" output -json virtual_clusters | jq -r ".${TEAM}.id")"
-NAMESPACE="$(terraform -chdir="${STACK_DIR}" output -json virtual_clusters | jq -r ".${TEAM}.namespace")"
-EXECUTION_ROLE_ARN="$(terraform -chdir="${STACK_DIR}" output -json job_execution_role_arns | jq -r ".${TEAM}")"
+VIRTUAL_CLUSTER_ID="$(terraform -chdir="${STACK_DIR}" output -json virtual_clusters | jq -r ".[\"${TEAM}\"].id")"
+NAMESPACE="$(terraform -chdir="${STACK_DIR}" output -json virtual_clusters | jq -r ".[\"${TEAM}\"].namespace")"
+EXECUTION_ROLE_ARN="$(terraform -chdir="${STACK_DIR}" output -json job_execution_role_arns | jq -r ".[\"${TEAM}\"]")"
 
 if [[ -z "${VIRTUAL_CLUSTER_ID}" || "${VIRTUAL_CLUSTER_ID}" == "null" || -z "${NAMESPACE}" || "${NAMESPACE}" == "null" || -z "${EXECUTION_ROLE_ARN}" || "${EXECUTION_ROLE_ARN}" == "null" ]]; then
   echo "Could not resolve Terraform outputs for TEAM='${TEAM}' from ${STACK_DIR}." >&2
@@ -53,7 +60,7 @@ echo "NAMESPACE=${NAMESPACE}"
 echo "EXECUTION_ROLE_ARN=${EXECUTION_ROLE_ARN}"
 
 JOB_NAME="nvme-ssd-${TEAM}-$(date +%Y%m%d%H%M%S)"
-LOG_GROUP="$(terraform -chdir="${STACK_DIR}" output -json cloudwatch_log_groups | jq -r ".${TEAM}.name")"
+LOG_GROUP="$(terraform -chdir="${STACK_DIR}" output -json cloudwatch_log_groups | jq -r ".[\"${TEAM}\"].name")"
 SPARK_JOB_S3_PATH="${S3_BUCKET_URI%/}/${VIRTUAL_CLUSTER_ID}/${JOB_NAME}"
 SCRIPTS_S3_PATH="${SPARK_JOB_S3_PATH}/scripts"
 INPUT_DATA_S3_PATH="${SPARK_JOB_S3_PATH}/input"
@@ -63,8 +70,8 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 echo "Rendering namespace in pod templates..."
-sed -E "s|namespace: .*|namespace: ${NAMESPACE}|" "${SCRIPT_DIR}/driver-pod-template.yaml" > "${TMP_DIR}/driver-pod-template.yaml"
-sed -E "s|namespace: .*|namespace: ${NAMESPACE}|" "${SCRIPT_DIR}/executor-pod-template.yaml" > "${TMP_DIR}/executor-pod-template.yaml"
+sed -E "s|namespace: .*|namespace: ${NAMESPACE}|" "${SCRIPT_DIR}/pod-templates/driver-pod-template.yaml" > "${TMP_DIR}/driver-pod-template.yaml"
+sed -E "s|namespace: .*|namespace: ${NAMESPACE}|" "${SCRIPT_DIR}/pod-templates/executor-pod-template.yaml" > "${TMP_DIR}/executor-pod-template.yaml"
 
 echo "Uploading PySpark script and pod templates to S3..."
 aws s3 cp "${SCRIPT_DIR}/pyspark-taxi-trip.py" "${SCRIPTS_S3_PATH}/pyspark-taxi-trip.py" --region "${AWS_REGION}"
